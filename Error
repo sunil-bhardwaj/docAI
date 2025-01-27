@@ -1,0 +1,55 @@
+previously reported;
+
+s previously reported;
+
+eviously reported;
+
+ns previously reported.
+
+Traceback (most recent call last):
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda\exception_handler.py", line 18, in __call_ return func(*args, **kwargs)
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda\cli\main.py", line 61, in main_subshell exit_code do_call(args, parser)
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda\cli\conda_argparse.py", line 205, in do_call result getattr(module, func_name) (args, parser) File "C:\ProgramData\miniconda3\lib\site-packages\conda\notices\core.py", line 132, in wrapper
+
+return func(*args, **kwargs) File "C:\ProgramData\miniconda3\lib\site-packages\conda\cli\main_install.py", line 152, in execute return install(args, parser, "install")
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda\cli\install.py", line 454, in install
+
+raise e File "C:\ProgramData\miniconda3\lib\site-packages\conda\cli\install.py", line 409, in install
+
+unlink link_transaction solver.solve_for_transaction( File "C:\ProgramData\miniconda3\lib\site-packages\conda\core\solve.py", line 153, in solve for_transn unlink precs, link precs self.solve_for_diff(
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda\core\solve.py", line 222, in solve_for_diff final precs self.solve final_state(
+
+File "C:\ProgramData\miniconda3\lib\site-packages\conda_libmamba_solver\solver.py", line 248, in sole out_state self._solving_loop(in_state, out state, index) File "C:\ProgramData\miniconda3\lib\site-packages\conda_libmamba_solver\solver.py", line 366, in _sop
+
+raise exc conda_libmamba_solver.exceptions. LibMambaUnsatisfiableError: Encountered problems while solving:
+
+package cudatoolkit-11.2.0-h688a323_7 has constraint_cuda >-11.2 conflicting with_cuda-9.1-0
+
+Could not solve for environment specs
+
+The following packages are incompatible
+
+cuda is requested and not installable because there are no viable options
+
+can
+
+cudatoolkit 11.2.0 would require
+
+cuda >-11.2, which conflicts with any installable versions previously reported;
+
+cudatoolkit 11.2.1 would require
+
+L cuda >-11.2.1, which conflicts with any installable versions previously reported;
+
+cudatoolkit 11.2.2 would require
+
+cuda >-11, which conflicts with any installable versions previously reported;
+
+cudatoolkit 11.2.2 would require
+
+Lcuda > 11.2.2, which conflicts with any installable versions previously reported.

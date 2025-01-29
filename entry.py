@@ -1,133 +1,312 @@
-import os
-import requests
-import time
-from utils import *
 import streamlit as st
-from streamlit_lottie import st_lottie
-from transformers import pipeline
-from langchain.agents.agent_toolkits import create_vectorstore_agent, VectorStoreToolkit, VectorStoreInfo
-from langchain.vectorstores import Chroma
-from langchain.document_loaders import PyPDFLoader
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.llms import HuggingFacePipeline
-from langchain.agents import AgentExecutor
+import os
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from dotenv import load_dotenv
+#from langchain_community.embeddings import OllamaEmbeddings
+from langchain_ollama import OllamaLLM, OllamaEmbeddings  # Updated imports
+import faiss
+from langchain_community.docstore import InMemoryDocstore
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.chains.combine_documents import create_stuff_documents_chain
+#from langchain_community.llms import Ollama
+from langchain_community.llms.ollama import Ollama
+from langchain.chains import create_retrieval_chain
+import pickle
+import time
+from rank_bm25 import BM25Okapi
+###########################################################################
 
-# Change to use a text generation model compatible with CausalLM
-nlp_pipeline = pipeline("text-generation", model="gpt2", max_new_tokens=100)  # Set max_new_tokens  # GPT-2 for text generation
-hf_pipeline = HuggingFacePipeline(pipeline=nlp_pipeline)
+###########################################################################
+start = time.time()
+st.set_page_config(page_title="PDFChat")
+st.title("**PdfChat: An AI PDF Analysis Tool**")
+FAISS_INDEX_PATH = "faiss_index.bin"
+FAISS_METADATA_PATH = "faiss_metadata.pkl"
+LAST_PDF_PATH = "last_uploaded_pdf.txt"
+LAST_MODEL_PATH = "last_used_model.txt"
+bm25 = None
+bm25_docs = None
+"""
+Model	Speed	Size	         Best For
+Mistral 7B	🚀 Fast	            🟢 Small	    Semantic Search
+Gemma 2B	⚡ Super Fast	   🟢 Tiny	       Lightweight Q&A
+Llama 3 8B	⚡ Medium	       🔵 Medium	   Strong Reasoning
+Phi-3 Mini	🚀 Fast	            🟢 Small	    Code & Docs
+TinyLlama	⚡ Super Fast	   🟢 1.1B	       Low-RAM Devices
+Falcon 7B	🚀 Fast	            🔵 Medium	    Conversational AI
+Zephyr 7B	⚡ Fast	           🔵 Medium	   Chatbots & Q&A
 
-# Define embeddings
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+"""
 
-# Set page config
-st.set_page_config(page_title="DocWise")
-def load_lottieurl(url):
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
+available_models = ["llama2", "llama3", "llama3.3", "gemma", "mistral", "deepseek-r1", "tinyllama","phi4","Falcon","Zephyr"] # Search for some more efficient models free and open source
+selected_model = st.selectbox("Choose an AI Model:", available_models)
+# Initialize LLM based on selected model
+model_choice = st.selectbox("Choose the LLM Provider:", ["Ollama", "GPT4All", "Mistral", "Gemma", "TinyLlama", "Zephyr"])
+if model_choice == "Ollama":
+    llm = OllamaLLM(model=selected_model)
+    embeddings = OllamaEmbeddings(model=selected_model)
+elif model_choice == "GPT4All":
+    llm = GPT4All(model=selected_model)  # You can customize with specific models for GPT4All.
+    embeddings = OllamaEmbeddings(model=selected_model) 
+else:
+    # Implement other LLM options if needed, such as Mistral, Gemma, etc.
+    llm = OllamaLLM(model=selected_model)  # Default to Ollama for other models
+    embeddings = OllamaEmbeddings(model=selected_model)
 
-# Lottie animation for loading
-st_lottie(load_lottieurl("https://assets8.lottiefiles.com/packages/lf20_G6Lxp3nm1p.json"), height=200, key='coding')
+st.text(f"Created OllamaLLM ({selected_model}) in  : {time.time() - start:.2f} seconds")
 
-# Title of the app
-st.title("**DocWise: An AI PDF Analysis Tool**")
+###########################################################################
+# ----------------------------------------
+# 📂 Allow User to Upload a PDF File
+# ----------------------------------------
+uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+if uploaded_file is None:
+    st.warning("Please upload a PDF to proceed.")
+    st.stop()
+# Save uploaded PDF to a temporary file
+PDF_FILE = "uploaded.pdf"
+with open(PDF_FILE, "wb") as f:
+    f.write(uploaded_file.getbuffer()) 
+# ----------------------------------------
+# 🔄 Check if this is a new PDF
+# ----------------------------------------
+model_changed, new_pdf_uploaded = True, True
+if os.path.exists(LAST_MODEL_PATH):
+    with open(LAST_MODEL_PATH, "r") as f:
+        last_model = f.read().strip()
+    if last_model == selected_model:
+        model_changed = False  # Model is the same
+if os.path.exists(LAST_PDF_PATH):
+    with open(LAST_PDF_PATH, "r") as f:
+        last_pdf_name = f.read().strip()
+    if last_pdf_name == uploaded_file.name:
+        new_pdf_uploaded = False  # Same PDF
+###########################################################################
+def tokenize(text):
+    return text.lower().split()
+def create_bm25_index(documents):
+    global bm25, bm25_docs
+    tokenized_corpus = [tokenize(doc.page_content) for doc in documents]
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_docs = documents
 
-# Session state initialization
-if 'uploaded' not in st.session_state:
-    st.session_state['uploaded'] = False
-    st.session_state['filename'] = None
-    st.session_state['agent_executor'] = None
-    st.session_state['store'] = None
 
-# File upload and processing
-if not st.session_state['uploaded']:
-    st.write("Upload your **:blue[pdf]** and ask your personal AI assistant any questions about it!")
-    input_file = st.file_uploader('Choose a file')
+###########################################################################
 
-    if input_file and does_file_have_pdf_extension(input_file):
-        upload_dir = "uploads"
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-        # Store PDF file
-        path = store_pdf_file(input_file, upload_dir)
-        scs = st.success("File successfully uploaded")
-        filename = input_file.name
 
-        with st.spinner("Analyzing document..."):
-            loader = PyPDFLoader(path)
-            pages = loader.load_and_split()
-            # Create vector store from the document pages
-            store = Chroma.from_documents(pages, embeddings, collection_name="analysis")
-            vectorstore_info = VectorStoreInfo(name=filename, description="Analyzing PDF", vectorstore=store)
+st.text(f"Created OllamaLLM in  : {time.time() - start:.2f} seconds")
+embeddings = OllamaEmbeddings(model=selected_model)
+st.text(f"Created Embedding ({selected_model}) in  : {time.time() - start:.2f} seconds")
+###########################################################################
+# Function to Save FAISS Vectorstore#########################################
+def save_faiss_vectorstore(vectorstore):
+    """Saves FAISS vectorstore index and metadata."""
+    faiss.write_index(vectorstore.index, FAISS_INDEX_PATH)
+    metadata = {
+            "documents": vectorstore.docstore._dict,  # Save document store
+            "index_to_docstore_id": vectorstore.index_to_docstore_id  # Ensure correct key storage
+        }
+    with open(FAISS_METADATA_PATH, "wb") as f:
+        pickle.dump(metadata, f)
+    st.text(f"FAISS index saved in  : {time.time() - start:.2f} seconds")
+##############################################################################
+# Function to Load FAISS Vectorstore##########################################
+def load_faiss_vectorstore():
+    """Loads FAISS vectorstore if available."""
+    if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(FAISS_METADATA_PATH):
+        st.text("Loading existing FAISS index...")
+        index = faiss.read_index(FAISS_INDEX_PATH)
+        with open(FAISS_METADATA_PATH, "rb") as f:
+            metadata = pickle.load(f)
+        docstore = InMemoryDocstore(metadata["documents"])
+        index_to_docstore_id = metadata.get("index_to_docstore_id", {})
+        max_index = index.ntotal
+        index_to_docstore_id = {i: index_to_docstore_id.get(i, str(i)) for i in range(max_index)}
+        st.text(f"Time taken Till load EXISTING faiss_vectorstore : {time.time() - start:.2f} seconds")
+        documents = list(docstore._dict.values())  # Extract stored documents
+        
+        create_bm25_index(documents)  
+        return FAISS(
+            index=index,
+            docstore=docstore,
+            index_to_docstore_id=index_to_docstore_id,
+            embedding_function=embeddings.embed_query  # Required for FAISS
+        )
+    return None
+##############################################################################
+if new_pdf_uploaded:
+    st.text("🆕 New PDF detected. Rebuilding FAISS index...")
+    
+    # Delete old FAISS index files
+    for file in [FAISS_INDEX_PATH, FAISS_METADATA_PATH]:
+        if os.path.exists(file):
+            os.remove(file)
+    # Process new PDF
+    loader = PyPDFLoader(PDF_FILE)
+    docs = loader.load_and_split(RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=250))
+    
+    for i, doc in enumerate(docs):
+        doc.metadata["source"] = f"Page {doc.metadata.get('page', i)}"
 
-            # Create the toolkit and agent executor with error handling
-            toolkit = VectorStoreToolkit(vectorstore_info=vectorstore_info, llm=hf_pipeline)
-            agent_executor = create_vectorstore_agent(
-                llm=hf_pipeline,
-                toolkit=toolkit,
-                verbose=True,
-                handle_parsing_errors=True
-            )
-         
-            st.session_state['agent_executor'] = agent_executor
-            st.session_state['store'] = store
-        scs.empty()
+    db = FAISS.from_documents(docs, embeddings)
+    create_bm25_index(docs)
+    # Save new FAISS index
+    save_faiss_vectorstore(db)
+    # Store the uploaded filename
+    with open(LAST_PDF_PATH, "w") as f:
+        f.write(uploaded_file.name)
+else:
+    st.text("🔄 Using previously loaded FAISS index...")
+    db = load_faiss_vectorstore()
+    
 
-        st.session_state['uploaded'] = True
-        st.session_state['filename'] = filename
 
-        st.rerun()
+##############################################################################
+# if db is None:
+#     # If not available, process the PDF and create it
+#     st.text("Processing PDF and creating FAISS index...")
+    
+#     loader = PyPDFLoader(PDF_FILE)
+#     docs = loader.load_and_split(RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200))
+    
+#     db = FAISS.from_documents(docs, embeddings)
+#     st.text(f"Time taken to create NEW faiss_vectorstore : {time.time() - start:.2f} seconds")
+#     # Save FAISS index for future use
+#     save_faiss_vectorstore(db)
+##############################################################################
+st.text("FAISS vectorstore is ready.")
 
-# Query handling after upload
-if st.session_state['uploaded']:
-    st.write(f"Enter your questions about the document '{st.session_state['filename']}' below:")
-    prompt = "What document is all about"#st.text_input("\nType your query")
-    if prompt:
-        #prompt = prompt.strip('"')
-        agent_executor = st.session_state['agent_executor']
-        store = st.session_state['store']
-        with st.spinner("Generating response..."):
-            try:
-                if agent_executor is None:
-                    st.error("Agent executor is not properly initialized.")
-                else:
-                    # Run the agent with the input prompt
-                    response = agent_executor.run(input="What is the main topic of the document?")
+st.text("Creating ChatPromptTemplate...")
+prompt = ChatPromptTemplate.from_template("""
+You are an AI assistant that answers questions based on the provided PDF context.
 
-                    # Debugging: Check response type and content
-                    st.write("Response with intermediate steps: ", response)
-                    st.write("Type of raw agent response: ", type(response))
-                    if response is None or response == "":
-                        st.write("No response received from the agent.")
-                    else:
-                        st.write("Raw agent response: ", response)
+📌 **Instructions:**
+- Answer only using the context provided.
+- If unsure, say "I don't have enough information from the document."
+- Keep answers **clear and concise**.
 
-                    # Check if the response contains an action or answer
-                    if isinstance(response, dict):
-                        if "answer" in response:
-                            st.write("Answer: ", response["answer"])  # Display the answer if it's available
-                        elif "action" in response:
-                            st.write("Action: ", response["action"])  # Display the action if it's available
-                        else:
-                            st.write("Unable to generate a valid response.")
-                    else:
-                        st.write("Unexpected response format. Full response: ", response)
+📝 **Context:**
+{context}
 
-            except ValueError as e:
-                st.error(f"A value parsing error occurred: {str(e)}")
-                st.write("Error Value details: ", e)
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                st.write("Error details: ", e)
+❓ **User Question:**  
+{input}
+""")
+st.text("Creating document chain...")
+document_chain = create_stuff_documents_chain(llm,prompt)
+st.text("Creating retriever...")
+retirever = db.as_retriever(search_kwargs={"k": 5})
 
-            # Perform similarity search and display results
-            with st.expander("Similarity Search"):
-                try:
-                    search = store.similarity_search_with_score(prompt)
-                    if search:
-                        st.write(search[0][0].page_content)
-                    else:
-                        st.write("No results found in the document for the query.")
-                except Exception as e:
-                    st.error(f"An error occurred during similarity search: {str(e)}")
+
+#################################### **Query Expansion Function**
+def expand_query(query):
+    """Expands query using LLM to generate relevant synonyms and variations."""
+    expansion_prompt = f"""
+    Generate alternative phrasings and synonyms for the following query:
+    
+    "{query}"
+    
+    Provide at least 3 alternative queries that mean the same thing.
+    """
+    expansion_result = llm.invoke(expansion_prompt)
+    
+    if expansion_result:
+        expanded_queries = expansion_result.strip().split("\n")
+        return [query] + expanded_queries  # Include original query
+    else:
+        return [query]
+
+# ----------------------------------------
+#################################### **Fix: Handle missing documents gracefully**
+def bm25_search(query, top_k=5):
+    if bm25 is None or bm25_docs is None:
+        raise ValueError("BM25 index is not initialized!")
+    tokenized_query = tokenize(query)
+    scores = bm25.get_scores(tokenized_query)
+    top_n_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+    return [bm25_docs[i] for i in top_n_indices]
+def hybrid_search(query, retirever):
+    """Combine BM25 and FAISS results for improved retrieval."""
+    faiss_results = retirever.get_relevant_documents(query)
+    bm25_results = bm25_search(query)
+
+    # Merge & remove duplicates
+    all_results = {doc.page_content: doc for doc in faiss_results + bm25_results}.values()
+    return list(all_results)
+def safe_similarity_search1(query):
+    try:
+        return retirever.get_relevant_documents(query)
+    except ValueError as e:
+        st.error(f"Error: {e}")
+        st.text("Rebuilding FAISS index...")
+        os.remove(FAISS_INDEX_PATH)
+        os.remove(FAISS_METADATA_PATH)
+        st.text("Please restart the app.")
+        return []
+ ################################################# 
+def safe_similarity_search2(query):
+    """Performs query expansion and retrieves relevant documents."""
+    try:
+        # Expand user query
+        expanded_queries = expand_query(query)
+        
+        # Retrieve documents for all expanded queries
+        all_docs = []
+        for expanded_query in expanded_queries:
+            all_docs.extend(retirever.get_relevant_documents(expanded_query))
+        
+        # Remove duplicates
+        unique_docs = {doc.page_content: doc for doc in all_docs}.values()
+        return list(unique_docs)
+    
+    except ValueError as e:
+        st.error(f"⚠️ Error: {e}")
+        st.text("Rebuilding FAISS index...")
+        for file in [FAISS_INDEX_PATH, FAISS_METADATA_PATH]:
+            if os.path.exists(file):
+                os.remove(file)
+        st.text("Please restart the app.")
+        return []   
+################################################# 
+st.text("Creating retrieval chain...")
+retrieval_chain = create_retrieval_chain(retirever,document_chain)
+st.text(f"Time taken Till Type your query : {time.time() - start:.2f} seconds")
+search_method = st.selectbox("Choose Search Method:", 
+                             ("BM25 (Fast Keyword Search)", 
+                              "FAISS Embeddings (Semantic Search)", 
+                              "Hybrid Search (BM25 + FAISS)","Basic Search","Semantic Search"))
+prompt = st.text_input("Type your query")
+
+
+def selected_similarity_search(query):
+    if search_method == "Basic Search":
+        return safe_similarity_search1(query)
+    elif search_method == "Semantic Search":
+        return safe_similarity_search2(query)
+    elif search_method == "BM25 (Fast Keyword Search)":
+        return bm25_search(query)
+    elif search_method == "FAISS Embeddings (Semantic Search)":
+        return retirever.get_relevant_documents(query)
+    elif search_method == "Hybrid Search (BM25 + FAISS)":
+        return hybrid_search(query, retirever)
+    
+if prompt:
+    st.text("Processing query...")
+    try:
+        documents = selected_similarity_search(prompt)
+        if not documents:
+            st.text("No relevant documents found.")
+        else:
+            response = retrieval_chain.invoke({"input": prompt})
+            st.text("Query completed.")
+            print("Answer:", response['answer'])
+            st.write(response['answer'])
+            st.text(f"Total Time taken: {time.time() - start:.2f} seconds")
+    except KeyError as e:
+        st.text(f"Error: Missing document ID {e}. Try rebuilding the FAISS index.")
+
+    
+
+   
+    

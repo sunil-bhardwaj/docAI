@@ -5,6 +5,5 @@ langchain_community
 ipykernel
 pypdf
 langchain_ollama
-pickle
 rank-bm25
 transformers

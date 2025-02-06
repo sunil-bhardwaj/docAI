@@ -1,0 +1,109 @@
+# Install necessary libraries if not already installed
+#!pip install transformers datasets accelerate bitsandbytes peft trl
+
+# Import necessary libraries
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+import torch
+
+from transformers import TrainingArguments
+from trl import SFTTrainer
+import os
+from google.colab import drive
+
+# 🔹 1️⃣ Mount Google Drive to save checkpoints
+drive.mount('/content/drive')
+
+# Define checkpoint directory in Google Drive
+checkpoint_dir = "/content/drive/MyDrive/colab_checkpoints/"
+os.makedirs(checkpoint_dir, exist_ok=True)
+
+# Load dataset
+dataset = load_dataset("viber1/indian-law-dataset", split="train")
+
+# Check the dataset structure
+print("Dataset Columns:", dataset.column_names)
+
+# Define model and tokenizer
+model_id = "TinyLlama/TinyLlama-1.1B-Chat-v0.1"
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config, device_map={"": 0})
+
+# Prepare model for LoRA training
+model = prepare_model_for_kbit_training(model)
+
+# Define LoRA configuration
+lora_config = LoraConfig(
+    r=8,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+# Apply LoRA
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+
+# Preprocessing function
+def tokenize_function(examples):
+    texts = [instr + " " + resp for instr, resp in zip(examples["Instruction"], examples["Response"])]
+    return tokenizer(texts, padding="max_length", truncation=True, max_length=512)
+
+# Apply tokenization to dataset
+dataset = dataset.map(tokenize_function, batched=True)
+
+# 🔹 2️⃣ Define training arguments with frequent checkpointing
+training_args = TrainingArguments(
+    output_dir="./results",  # Model will save here first
+    per_device_train_batch_size=4,
+    gradient_accumulation_steps=4,
+    warmup_steps=100,
+    max_steps=1000,
+    learning_rate=2e-4,
+    fp16=True,
+    logging_steps=10,
+    optim="paged_adamw_8bit",
+    lr_scheduler_type="cosine",
+    save_strategy="steps",
+    save_steps=200,  # 🔹 Save a checkpoint every 200 steps
+    push_to_hub=False
+)
+
+# 🔹 3️⃣ Resume from the latest checkpoint if it exists
+latest_checkpoint = None
+if os.path.exists(checkpoint_dir):
+    checkpoints = [ckpt for ckpt in os.listdir(checkpoint_dir) if "checkpoint-" in ckpt]
+    if checkpoints:
+        latest_checkpoint = os.path.join(checkpoint_dir, sorted(checkpoints, key=lambda x: int(x.split('-')[-1]))[-1])
+        print(f"✅ Resuming from checkpoint: {latest_checkpoint}")
+
+# Create the SFTTrainer
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=dataset,
+    peft_config=lora_config,
+    tokenizer=tokenizer,
+    args=training_args,
+)
+
+# 🔹 4️⃣ Train the model (resume from checkpoint if available)
+trainer.train(resume_from_checkpoint=latest_checkpoint if latest_checkpoint else None)
+
+# 🔹 5️⃣ Save the final trained model
+trainer.save_model("./trained-model")
+
+# 🔹 6️⃣ Copy the last checkpoint to Google Drive
+!cp -r ./results/checkpoint-* "$checkpoint_dir"
+
+print(f"✅ Checkpoints saved to: {checkpoint_dir}")

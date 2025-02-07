@@ -1,0 +1,79 @@
+import os
+import fitz  # PyMuPDF for PDF extraction
+import pandas as pd
+import torch
+import faiss
+import numpy as np
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# 🔹 1️⃣ Mount Google Drive to access your trained model
+from google.colab import drive
+drive.mount('/content/drive')
+
+# 🔹 2️⃣ Define the path to your trained model in Google Drive
+trained_model_path = "/content/drive/MyDrive/colab_checkpoints/trained_model/"
+
+# 🔹 3️⃣ Load your custom trained model and tokenizer
+tokenizer = AutoTokenizer.from_pretrained(trained_model_path)
+model = AutoModelForCausalLM.from_pretrained(trained_model_path, device_map="auto")
+
+# 🔹 4️⃣ Define a fixed set of questions to ask each PDF
+questions = [
+    "What are the facts of the case?",
+    "What was the verdict of the case?",
+    "What legal precedents were mentioned?",
+    "What are the key arguments in the case?"
+]
+
+# 🔹 5️⃣ Function to extract text from a PDF
+def extract_text_from_pdf(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = " ".join([page.get_text() for page in doc])
+    return text
+
+# 🔹 6️⃣ Function to generate embeddings from text
+def generate_embeddings(texts):
+    inputs = tokenizer(texts, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    embeddings = outputs.last_hidden_state.mean(dim=1).detach().cpu().numpy()
+    return embeddings
+
+# 🔹 7️⃣ Function to return the most relevant text chunk using FAISS
+def retrieve_relevant_text(chunks, question):
+    # Create FAISS index for searching relevant text
+    embeddings = generate_embeddings(chunks)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(embeddings)
+
+    # Encode the question as an embedding and search
+    question_embedding = generate_embeddings([question])
+    distances, indices = index.search(question_embedding, 1)  # Top 1 result
+
+    # Return the most relevant chunk
+    return chunks[indices[0][0]]
+
+# 🔹 8️⃣ Function to process a PDF and save answers to an Excel file
+def process_pdf_and_generate_answers(pdf_path, output_file):
+    # Step 1: Extract text from PDF
+    text = extract_text_from_pdf(pdf_path)
+    
+    # Step 2: Split text into smaller chunks (to handle long documents)
+    chunk_size = 1000  # Adjust as needed
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    
+    # Step 3: Generate answers for each question
+    qa_pairs = []
+    for question in questions:
+        relevant_text = retrieve_relevant_text(chunks, question)
+        qa_pairs.append((question, relevant_text))
+
+    # Step 4: Save results to an Excel file
+    df = pd.DataFrame(qa_pairs, columns=["Question", "Answer"])
+    df.to_excel(output_file, index=False)
+    print(f"✅ Answers saved to {output_file}")
+
+# 🔹 9️⃣ Run the program for a sample case file
+pdf_path = "path_to_case_file.pdf"  # Replace with actual PDF path
+output_file = "case_answers.xlsx"
+process_pdf_and_generate_answers(pdf_path, output_file)

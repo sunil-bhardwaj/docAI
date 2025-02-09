@@ -1,40 +1,41 @@
-Forum | Location
-Bench (Judge name and designations)
-Date of pronouncement / order / judgement
-Case Type
-Case number / Netural Citation
-Any other citations with Year/Volume
-Petitioner name
-Respondent name
-Disposal Nature
-Topic / Issue in 1 sentence
-Act / Rules 
-Section numbers / Rule number / Circular number / Notification number
-List of cases referred in document with citation numbers
-Case arising from (reference to lower court citation )
-Who appeared for petitioner?
-Who appeared for respondent?
-Sentence level annotation: Extract all the sentences from the PDF that fit under following headings
-Facts and background
-Background of parties and transaction in question
-Background of case (what happened in lower courts)
-Key Legal Questions or Issues or Prayer
-Arguments by lawyer of petitioner
-Background / facts or arguments stated by petitioner advocate
-Past judgments or orders, including party names, case numbers, court, and year as stated by petitioner 
-Why if these judgments should be followed, not followed, or overruled, with reasoning as stated by petitioner 
-Arguments by lawyer of respondent
-Background / facts or arguments stated by respondent advocate
-Past judgments or orders, including party names, case numbers, court, and year as stated by respondent 
-Why if these judgments should be followed, not followed, or overruled, with reasoning as stated by respondent 
-Court's reiteration of
-Facts and background (as noted by judges)
-Arguments by lawyers (that were considered by the judges)
-"Reference to act / chapter / section / sub section / clause / subclause / notification / circular / more made by the judges
-"
-Reference to old judgements by judges
-Judgements relied on (backward refrencing) + reasoning
-Judgements overruled (backward refrencing) + reasoning
-Judgements not found applicable (backward refrencing) + reasoning
-Observations, Inference, Interpretations, explanations, clarifications and final order / directions by judges
-Misc (sentences that do not form a part of any of these headings)
+[
+  "Where was the case heard?",
+  "Who were the judges on the bench, and what were their designations?",
+  "When was the judgment/order/pronouncement delivered?",
+  "What type of case is it?",
+  "What is the case number or neutral citation?",
+  "Are there any other relevant citations with the year/volume?",
+  "Who is the petitioner in this case?",
+  "Who is the respondent in this case?",
+  "What is the nature of the case disposal (e.g., dismissed, allowed, etc.)?",
+  "What is the main issue or topic of the case, summarized in one sentence?",
+  "What act or rules are applicable in this case?",
+  "Which sections, rules, circulars, or notifications are referenced in the case?",
+  "What cases were referred to in the document, and what are their citation numbers?",
+  "From which lower court is this case arising, and what is its citation?",
+  "Who represented the petitioner in the case?",
+  "Who represented the respondent in the case?",
+  
+  "What are the facts and background of the case?",
+  "What is the background of the parties and the transaction in question?",
+  "What happened in the lower courts regarding this case?",
+  "What are the key legal questions, issues, or prayers in the case?",
+  "What arguments did the petitioner’s lawyer present?",
+  "What background, facts, or arguments did the petitioner’s advocate state?",
+  "What past judgments or orders were cited by the petitioner’s advocate, including case numbers, party names, and court details?",
+  "Why did the petitioner’s advocate argue that certain judgments should be followed, not followed, or overruled?",
+  "What arguments did the respondent’s lawyer present?",
+  "What background, facts, or arguments did the respondent’s advocate state?",
+  "What past judgments or orders did the respondent’s advocate refer to, including party names, case numbers, court details, and year?",
+  "Why did the respondent’s advocate argue that certain judgments should be followed, not followed, or overruled?",
+  
+  "How did the court reiterate the facts and background of the case?",
+  "What arguments made by the lawyers were considered by the judges?",
+  "What specific sections, acts, chapters, clauses, or notifications did the judges refer to?",
+  "Which old judgments were referenced by the judges?",
+  "Which judgments did the judges rely on, and what reasoning did they provide?",
+  "Which judgments did the judges overrule, and what reasoning did they give for overruling them?",
+  "Which judgments did the judges find not applicable, and why?",
+  "What observations, inferences, interpretations, explanations, or clarifications did the judges provide, and what was the final order/direction?",
+  "Are there any miscellaneous sentences that do not fit into the categories above?"
+]
